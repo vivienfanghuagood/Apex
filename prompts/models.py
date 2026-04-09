@@ -154,6 +154,20 @@ MODELS: list[ModelConfig] = [
         notes="Code-generation workload; long-context prefill stress",
     ),
 
+    # ── Qwen 3.5 family ─────────────────────────────────────────────────────
+    ModelConfig(
+        hf_id="Qwen/Qwen3.5-4B",
+        family="qwen3_5", params_b=4,
+        attention="gqa",    num_heads=16, num_kv_heads=4,  head_dim=256,
+        hidden_dim=2560,    num_layers=32,
+        mlp_type="dense",   num_experts=1, active_experts=1,
+        context_len=262_144,
+        frameworks=["vllm"],
+        notes="Hybrid linear/full attention (every 4th layer full); head_dim=256; "
+              "linear_attention layers with conv kernel; multimodal (vision+text); "
+              "local model at /app/models/Qwen3.5-4B",
+    ),
+
     # ── Google Gemma 2 ───────────────────────────────────────────────────────
     ModelConfig(
         hf_id="google/gemma-2-9b-it",

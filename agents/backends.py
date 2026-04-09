@@ -30,6 +30,7 @@ from pathlib import Path
 DEFAULT_AGENT = "claude"
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 DEFAULT_CODEX_MODEL = "gpt-5.3-codex"
+DEFAULT_OPENCODE_MODEL = "opencode/claude-opus-4-6"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_CONFIG_PATH = REPO_ROOT / "mcp_config.json"
@@ -41,6 +42,8 @@ def resolve_default_model(agent: str) -> str | None:
         return DEFAULT_CLAUDE_MODEL
     if agent == "codex":
         return _read_codex_config_model() or DEFAULT_CODEX_MODEL
+    if agent == "opencode":
+        return DEFAULT_OPENCODE_MODEL
     raise ValueError(f"Unsupported agent backend: {agent}")
 
 
@@ -95,6 +98,17 @@ def run_agent_task(
         )
     if agent == "codex":
         return _run_codex_task(
+            prompt=prompt,
+            cwd=cwd,
+            model=model,
+            max_turns=max_turns,
+            system_prompt=system_prompt,
+            solution_path=solution_path,
+        )
+    if agent == "opencode":
+        if not model:
+            model = DEFAULT_OPENCODE_MODEL
+        return _run_opencode_task(
             prompt=prompt,
             cwd=cwd,
             model=model,
@@ -330,3 +344,122 @@ def _read_codex_config_model() -> str | None:
         return None
     m = re.search(r'(?m)^\s*model\s*=\s*"([^"]+)"\s*$', text)
     return m.group(1) if m else None
+
+
+# ---------------------------------------------------------------------------
+# OpenCode backend
+# ---------------------------------------------------------------------------
+
+def _run_opencode_task(
+    *,
+    prompt: str,
+    cwd: Path,
+    model: str,
+    max_turns: int,
+    system_prompt: str | None,
+    solution_path: Path,
+) -> tuple[list, bool]:
+    """Run a kernel optimization task via `opencode run --format json`.
+
+    OpenCode is a local CLI coding agent with built-in tools (Bash, Read,
+    Edit, Write, Glob, Grep) — functionally equivalent to Claude Code.
+    """
+    if not _command_exists("opencode"):
+        raise RuntimeError("opencode CLI not installed or not in PATH.")
+
+    combined_prompt = _build_opencode_prompt(prompt, system_prompt, max_turns)
+
+    cmd = [
+        "opencode", "run",
+        "--format", "json",
+        "--dangerously-skip-permissions",
+        "--dir", str(cwd),
+    ]
+    if model:
+        cmd += ["-m", model]
+    cmd.append(combined_prompt)
+
+    env = os.environ.copy()
+
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, bufsize=1,
+    )
+
+    trajectory: list[dict] = []
+    total_in_tokens = 0
+    total_out_tokens = 0
+    total_cost = 0.0
+    step_count = 0
+
+    try:
+        for raw_line in proc.stdout:
+            line = raw_line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            trajectory.append(event)
+            etype = event.get("type", "")
+
+            if etype == "text":
+                part = event.get("part", {})
+                text = part.get("text", "")
+                if text:
+                    first_line = text.strip().splitlines()[0][:120] if text.strip() else ""
+                    if first_line:
+                        print(f"    text: {first_line}")
+
+            elif etype in ("tool_call", "tool_use"):
+                part = event.get("part", {})
+                tool_name = part.get("name", part.get("tool", "tool"))
+                state = part.get("state", {})
+                title = state.get("title") or part.get("title", "")
+                label = f"{tool_name}" + (f" ({title})" if title else "")
+                print(f"    tool: {label}")
+
+            elif etype in ("tool_result",):
+                pass  # quiet
+
+            elif etype == "step_finish":
+                part = event.get("part", {})
+                step_count += 1
+                tokens = part.get("tokens", {})
+                total_in_tokens += tokens.get("input", 0)
+                total_out_tokens += tokens.get("output", 0)
+                total_cost += part.get("cost", 0.0)
+                reason = part.get("reason", "")
+                if reason == "stop":
+                    print(f"    step {step_count}: done (tokens in={tokens.get('input',0)} out={tokens.get('output',0)})")
+                elif reason:
+                    print(f"    step {step_count}: {reason}")
+
+    except KeyboardInterrupt:
+        proc.terminate()
+    finally:
+        proc.wait()
+
+    stderr_text = (proc.stderr.read() or "").strip()
+    if stderr_text:
+        for sline in stderr_text.splitlines()[:5]:
+            sline = sline.strip()
+            if sline:
+                print(f"    opencode-stderr: {sline[:200]}")
+
+    if step_count > 0:
+        print(f"  result: steps={step_count}, tokens(in={total_in_tokens}, out={total_out_tokens}), cost=${total_cost:.4f}")
+
+    return trajectory, solution_path.exists()
+
+
+def _build_opencode_prompt(prompt: str, system_prompt: str | None, max_turns: int) -> str:
+    parts = []
+    if system_prompt:
+        parts.append(system_prompt.strip())
+        parts.append("")
+    parts.append(f"Complete this task efficiently (target <= {max_turns} steps).")
+    parts.append("")
+    parts.append(prompt.rstrip())
+    return "\n".join(parts)

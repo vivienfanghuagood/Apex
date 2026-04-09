@@ -106,6 +106,7 @@ from kernel_prompt import (
     _format_sources_block,
     ARCH_MAP,
     DEFAULT_TARGET,
+    detect_gpu,
 )
 from models import MODELS, ModelConfig
 
@@ -431,6 +432,9 @@ def _ensure_clean_baseline() -> None:
     for library in ("aiter", "vllm", "sglang"):
         try:
             pkg = importlib.import_module(library)
+            if pkg.__file__ is None:
+                # Namespace package (e.g. aiter on some ROCm installs) — skip
+                continue
             pkg_dir = Path(pkg.__file__).parent
             restored = 0
             for bak in sorted(pkg_dir.rglob("*.bak")):
@@ -5482,8 +5486,9 @@ def _add_common_args(parser):
                         help="Directory for state, reports, leaderboard, trajectory")
     parser.add_argument("--output-dir",
                         help="Directory for kernel task outputs (default: results-dir/output)")
-    parser.add_argument("--gpu", default="gfx950",
-                        help="Target GPU architecture (default: gfx950)")
+    _detected_gpu = detect_gpu()
+    parser.add_argument("--gpu", default=_detected_gpu,
+                        help=f"Target GPU architecture (default: {_detected_gpu}, auto-detected)")
     parser.add_argument("--kernel-python", default="",
                         help="Python with torch+triton for kernel execution (auto-detected)")
     parser.add_argument("--dry-run", action="store_true",
@@ -5527,7 +5532,7 @@ def _add_agent_args(parser):
     parser.add_argument("--agent-model", default=None,
                         help="Override the backend-specific default agent model")
     parser.add_argument("--agent-version", default="v1.0")
-    parser.add_argument("--agent-backend", default="claude", choices=["claude", "codex"])
+    parser.add_argument("--agent-backend", default="claude", choices=["claude", "codex", "opencode"])
     parser.add_argument("--parallel-kernels", type=int, default=1,
                         help="Number of kernels to optimize in parallel (default: 1)")
     parser.add_argument("--agent-model-simple", default="",
@@ -5595,7 +5600,7 @@ def main():
                     help="Push result to leaderboard")
     p.add_argument("--agent-model", default=None)
     p.add_argument("--agent-version", default="v1.0")
-    p.add_argument("--agent-backend", default="claude", choices=["claude", "codex"])
+    p.add_argument("--agent-backend", default="claude", choices=["claude", "codex", "opencode"])
     p.add_argument("--trajectory-store", default="file")
 
     # -- report --
@@ -5605,7 +5610,7 @@ def main():
     p.add_argument("-b", "--benchmark-config", default="")
     p.add_argument("--agent-model", default=None)
     p.add_argument("--agent-version", default="v1.0")
-    p.add_argument("--agent-backend", default="claude", choices=["claude", "codex"])
+    p.add_argument("--agent-backend", default="claude", choices=["claude", "codex", "opencode"])
 
     # -- run --
     p = subparsers.add_parser("run",
@@ -5634,8 +5639,9 @@ def main():
                    help="Filter SFT trajectories by quality (good|mediocre|bad)")
     p.add_argument("--min-score", type=float, default=0.0,
                    help="Minimum kernel score to include as a task")
-    p.add_argument("--gpu-arch", type=str, default="gfx950",
-                   help="Target GPU architecture (default: gfx950)")
+    _det_gpu = detect_gpu()
+    p.add_argument("--gpu-arch", type=str, default=_det_gpu,
+                   help=f"Target GPU architecture (default: {_det_gpu}, auto-detected)")
 
     # ── optimize-kernel: standalone kernel optimization with agent ─────
     p = subparsers.add_parser(
@@ -5646,8 +5652,8 @@ def main():
                    help="Directory for results and artifacts")
     p.add_argument("--output-dir",
                    help="Directory for task outputs (default: results-dir/output)")
-    p.add_argument("--gpu", default="gfx950",
-                   help="Target GPU architecture (default: gfx950)")
+    p.add_argument("--gpu", default=_det_gpu,
+                   help=f"Target GPU architecture (default: {_det_gpu}, auto-detected)")
     p.add_argument("--kernel-python", default="",
                    help="Python with torch+triton for kernel execution (auto-detected)")
     p.add_argument("--dry-run", action="store_true",
@@ -5664,8 +5670,8 @@ def main():
                    help="Directory for results (default: current directory)")
     p.add_argument("--output-dir",
                    help="Directory for task outputs (default: results-dir/output)")
-    p.add_argument("--gpu", default="gfx950",
-                   help="Target GPU architecture (default: gfx950)")
+    p.add_argument("--gpu", default=_det_gpu,
+                   help=f"Target GPU architecture (default: {_det_gpu}, auto-detected)")
     p.add_argument("--kernel-python", default="",
                    help="Python with torch+triton for kernel execution (auto-detected)")
     p.add_argument("--dry-run", action="store_true")

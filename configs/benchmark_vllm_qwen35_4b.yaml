@@ -1,0 +1,33 @@
+# Benchmark config for Qwen3.5-4B on vLLM (AMD gfx1100)
+# Used by the Apex workload optimization pipeline.
+benchmark:
+  framework: vllm
+  model: /app/models/Qwen3.5-4B
+  model_id: Qwen/Qwen3.5-4B
+  gpu_arch: gfx1100
+
+  # vLLM server args
+  server:
+    tensor_parallel_size: 1
+    max_model_len: 4096
+    dtype: bfloat16
+    gpu_memory_utilization: 0.90
+    enforce_eager: true
+
+  # Workload spec
+  workload:
+    num_prompts: 100
+    input_len: 512
+    output_len: 128
+    concurrency: 4
+
+  # Profiling
+  profiling:
+    enabled: true
+    profiler: rocprof
+    trace_duration_sec: 30
+
+  # Environment variables
+  envs:
+    VLLM_ROCM_USE_AITER: "0"
+    HSA_OVERRIDE_GFX_VERSION: "11.0.0"

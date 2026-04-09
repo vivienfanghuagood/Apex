@@ -42,6 +42,8 @@ ARCH_MAP = {
     "gfx940":  "AMD Instinct MI300A (CDNA3)",
     "gfx950":  "AMD Instinct MI355X (CDNA4)",
     "gfx90a":  "AMD Instinct MI250X (CDNA2)",
+    "gfx1100": "AMD Radeon RX 7900 XTX / PRO W7900 (RDNA3)",
+    "gfx1101": "AMD Radeon RX 7800 XT / PRO W7800 (RDNA3)",
 }
 
 
@@ -59,6 +61,18 @@ def detect_gpu() -> str:
             return "gfx940"
         if "MI250" in out:
             return "gfx90a"
+    except Exception:
+        pass
+
+    # Fallback: try rocminfo for GFX arch detection (covers RDNA3 consumer GPUs)
+    try:
+        out = subprocess.check_output(
+            ["rocminfo"], text=True, timeout=10
+        )
+        for arch in ("gfx1100", "gfx1101", "gfx1200", "gfx1201"):
+            if arch in out:
+                _log.info("Detected GPU arch %s via rocminfo", arch)
+                return arch
     except Exception as e:
         _log.debug("GPU detection failed, using default %s: %s", DEFAULT_TARGET, e)
     return DEFAULT_TARGET
