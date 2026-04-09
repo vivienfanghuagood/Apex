@@ -773,13 +773,33 @@ def build_correctness_config(
     return {"mode": "pytorch", "tolerance": 1e-3, "num_tests": 10}, "pytorch"
 
 
-def get_spec(kernel_type: str, rocm_dir: Path | None = None) -> Optional[GroundTruthSpec]:
+def get_spec(
+    kernel_type: str,
+    rocm_dir: Path | None = None,
+    origin_library: str = "",
+) -> Optional[GroundTruthSpec]:
     """Look up ground truth for a specific kernel type.
 
-    Checks manual registry first, then scans if not found.
+    When *origin_library* is given and does NOT match the registry entry's
+    source_library (e.g. profiled kernel comes from vllm, but registry only
+    has aiter tests), fall through to a generic pytorch-mode spec that uses
+    the baseline source as-is.  This avoids requiring aiter test suites on
+    systems that run vllm natively without aiter.
     """
     if kernel_type in MANUAL_REGISTRY:
-        return MANUAL_REGISTRY[kernel_type]
+        spec = MANUAL_REGISTRY[kernel_type]
+        # If caller says "this kernel comes from vllm" but the registry entry
+        # points to aiter test files, the aiter tests won't be available.
+        # Fall through so the pipeline uses pytorch baseline-vs-solution mode.
+        if origin_library and spec.source_library and \
+                origin_library != spec.source_library:
+            logger.info(
+                "kernel_type=%s: origin_library=%s != registry source_library=%s; "
+                "skipping registry entry, will use pytorch baseline mode",
+                kernel_type, origin_library, spec.source_library,
+            )
+        else:
+            return spec
 
     for spec in scan_rocm_ground_truth(rocm_dir=rocm_dir, max_files=2000):
         if spec.kernel_type == kernel_type:

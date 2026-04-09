@@ -2144,8 +2144,10 @@ def _create_task_config(
 
     kernel_python = getattr(config, "kernel_python", "") or _detect_kernel_python()
 
-    # Ground truth lookup via shared helper
-    gt_spec = get_ground_truth_spec(spec)
+    # Ground truth lookup via shared helper — pass origin_library so it skips
+    # aiter-specific tests when the kernel actually comes from vllm
+    origin_lib = getattr(kernel, "origin_library", "") or ""
+    gt_spec = get_ground_truth_spec(spec, origin_library=origin_lib)
     correctness_cfg, gt_mode = build_correctness_config(
         gt_spec, rocm_root=REPO_ROOT / "tools" / "rocm",
     )
@@ -4858,7 +4860,7 @@ def _parse_kernel_spec(args) -> KernelStandaloneDefinition:
         if not gt.get("pytorch_reference_code"):
             kname = getattr(args, "kernel_name", "")
             if kname and get_ground_truth_spec is not None:
-                gt_spec = get_ground_truth_spec(kname)
+                gt_spec = get_ground_truth_spec(kname, origin_library=getattr(args, "framework", ""))
                 if gt_spec and gt_spec.mode == "pytorch" and gt_spec.pytorch_reference_code:
                     gt["pytorch_reference_code"] = gt_spec.pytorch_reference_code
                     if gt_spec.test_shapes_code:
