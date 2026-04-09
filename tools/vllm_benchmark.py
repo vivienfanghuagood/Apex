@@ -81,11 +81,20 @@ def _start_vllm_server(
     ]
     if enforce_eager:
         cmd.append("--enforce-eager")
+    if profile and profile_dir:
+        # Use vLLM's built-in profiler config (works with V1 engine)
+        cmd += [
+            "--profiler-config",
+            json.dumps({
+                "profiler": "torch",
+                "torch_profiler_dir": str(Path(profile_dir).resolve()),
+                "torch_profiler_with_stack": False,
+                "torch_profiler_use_gzip": False,
+            }),
+        ]
+        print(f"  [vllm] Torch profiler enabled: {profile_dir}")
 
     env = os.environ.copy()
-    if profile and profile_dir:
-        env["VLLM_TORCH_PROFILER_DIR"] = profile_dir
-        print(f"  [vllm] Torch profiler enabled: {profile_dir}")
 
     print(f"  [vllm] Starting: {' '.join(cmd[:8])}...")
     proc = subprocess.Popen(
@@ -168,6 +177,21 @@ def _run_benchmark(
           f"throughput: {results['output_throughput']} tok/s, "
           f"duration: {duration:.1f}s")
     return results
+
+
+def _profiler_api(port: int, action: str) -> bool:
+    """Call vLLM /start_profile or /stop_profile endpoint."""
+    import urllib.request
+    url = f"http://localhost:{port}/{action}"
+    try:
+        req = urllib.request.Request(url, data=b"", method="POST")
+        resp = urllib.request.urlopen(req, timeout=120)
+        ok = resp.status == 200
+        print(f"  [profile] {action}: {'OK' if ok else 'FAILED'}")
+        return ok
+    except Exception as e:
+        print(f"  [profile] {action}: {e}")
+        return False
 
 
 def _parse_torch_traces(trace_dir: str, top_k: int = 20) -> dict:
@@ -332,15 +356,24 @@ def main():
             _run_benchmark(port, warmup_prompts, args.output_len, concurrency=2,
                            model_name=args.model)
 
-        # Benchmark
+        # Benchmark (with optional profiling via API)
         print(f"\n=== Step 3: Benchmark ({args.num_prompts} requests) ===")
+        if args.profile:
+            _profiler_api(port, "start_profile")
+
         prompts = _generate_prompts(args.num_prompts, args.input_len)
         bench_results = _run_benchmark(port, prompts, args.output_len, args.concurrency,
                                        model_name=args.model)
 
+        if args.profile:
+            # Give the profiler a moment to flush, then stop
+            time.sleep(2)
+            _profiler_api(port, "stop_profile")
+            time.sleep(3)  # wait for trace files to be written
+
         # Gap analysis from traces
         gap_analysis = None
-        if args.profile and profile_dir and Path(profile_dir).exists():
+        if args.profile and profile_dir:
             print(f"\n=== Step 4: Gap Analysis (torch profiler traces) ===")
             gap_analysis = _parse_torch_traces(profile_dir)
 
@@ -350,7 +383,14 @@ def main():
             os.killpg(os.getpgid(server_proc.pid), signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             server_proc.terminate()
-        server_proc.wait(timeout=30)
+        try:
+            server_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(server_proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                server_proc.kill()
+            server_proc.wait(timeout=5)
 
     # Build and save report
     print(f"\n=== Step 5: Generating report ===")
