@@ -729,12 +729,19 @@ def build_correctness_config(
 
     if mode == "library_test" and gt_spec.unit_test_command:
         lib_dir = str(rocm_root / gt_spec.source_library) if gt_spec.source_library else ""
-        return {
-            "mode": "library_test",
-            "unit_test_command": gt_spec.unit_test_command,
-            "repo_url": gt_spec.repo_url,
-            "working_directory": lib_dir,
-        }, "library_test"
+        if lib_dir and not Path(lib_dir).is_dir():
+            logger.warning(
+                "kernel_type=%s: library_test working_directory %s does not exist; "
+                "falling back to pytorch mode",
+                gt_spec.kernel_type, lib_dir,
+            )
+        else:
+            return {
+                "mode": "library_test",
+                "unit_test_command": gt_spec.unit_test_command,
+                "repo_url": gt_spec.repo_url,
+                "working_directory": lib_dir,
+            }, "library_test"
 
     if mode == "library_test" and not gt_spec.unit_test_command:
         logger.warning(
