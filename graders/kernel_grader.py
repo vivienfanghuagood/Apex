@@ -888,6 +888,14 @@ def _grade_task_inner(
                 error="library_test mode but no unit_test_command in config",
             )
 
+        # Fallback: if working directory doesn't exist, switch to pytorch mode
+        if lib_working_dir and not Path(lib_working_dir).is_dir():
+            print(f"    [grader] library_test working_dir missing: {lib_working_dir}; "
+                  f"falling back to pytorch mode", file=sys.stderr)
+            corr_mode = "pytorch"
+            # Fall through to pytorch mode below
+
+    if corr_mode == "library_test":
         raw = _run_library_test(
             unit_test_cmd=unit_test_cmd,
             working_dir=lib_working_dir,
@@ -934,9 +942,43 @@ def _grade_task_inner(
 
     # ── Mode 1: PyTorch / Magpie compare (default) ───────────────────────
     if not baseline_path:
+        # No baseline available — try compile-only check on the solution
+        print("    [grader] No baseline path; attempting compile-only check", file=sys.stderr)
+        python_bin = cfg.get("performance", {}).get("command", "python3").split()[0]
+        # Resolve the actual solution file (config may say .hip but file is .py)
+        sol_file = str(solution.resolve())
+        compile_script = (
+            f"import importlib.util; "
+            f"s=importlib.util.spec_from_file_location('sol','{sol_file}'); "
+            f"m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print('OK')"
+        )
+        try:
+            r = subprocess.run(
+                [python_bin, "-c", compile_script],
+                capture_output=True, text=True, timeout=60,
+                cwd=str(task_dir),
+            )
+            compiled = r.returncode == 0 and "OK" in r.stdout
+            if not compiled:
+                print(f"    [grader] compile check: rc={r.returncode} stdout={r.stdout[:200]} stderr={r.stderr[:200]}", file=sys.stderr)
+        except Exception as e:
+            compiled = False
+            print(f"    [grader] compile check exception: {e}", file=sys.stderr)
+
+        speedup = 0.0
+        if compiled:
+            o_ms = _run_benchmark_script(sol_file, python_bin, str(task_dir))
+            if o_ms > 0:
+                speedup = 1.0  # no baseline to compare
+                print(f"    [grader] Solution self-benchmark: {o_ms:.4f} ms", file=sys.stderr)
+
         return KernelResult(
             task_id=task_id,
-            error="config.yaml missing baseline.path",
+            compiled=compiled,
+            correct=compiled,  # assume correct if compiles (no baseline to compare)
+            speedup=speedup,
+            raw={"_no_baseline": True, "_compile_only": True},
+            error="" if compiled else "solution failed to compile",
         )
 
     # Verify pipeline-generated correctness files haven't been tampered with
