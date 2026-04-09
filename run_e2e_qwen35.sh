@@ -43,6 +43,28 @@ if ! python3 -c "from vllm import LLM" 2>/dev/null; then
     export PYTHONPATH="/app/vllm-src/vllm${PYTHONPATH:+:$PYTHONPATH}"
   fi
 fi
+
+# Create tools/rocm/ symlinks so the pipeline can find baseline sources and test suites.
+# This avoids cloning entire ROCm repos — just uses locally installed packages.
+_setup_rocm_symlinks() {
+  local rocm_dir="$SCRIPT_DIR/tools/rocm"
+  [[ -d "$rocm_dir/aiter/aiter" && -d "$rocm_dir/vllm/vllm" ]] && return 0
+  echo "  Setting up tools/rocm/ symlinks..."
+  mkdir -p "$rocm_dir/aiter" "$rocm_dir/vllm"
+  # aiter: from site-packages (kernel sources, no test suite in pip package)
+  local aiter_pkg
+  aiter_pkg="$(python3 -c "import aiter; print(aiter.__path__[0])" 2>/dev/null)" || true
+  [[ -d "$aiter_pkg" ]] && ln -sf "$aiter_pkg" "$rocm_dir/aiter/aiter"
+  # vllm: from source checkout or site-packages
+  if [[ -d /app/vllm-src/vllm/vllm ]]; then
+    ln -sf /app/vllm-src/vllm/vllm "$rocm_dir/vllm/vllm"
+  else
+    local vllm_pkg
+    vllm_pkg="$(python3 -c "import vllm; print(vllm.__path__[0])" 2>/dev/null)" || true
+    [[ -d "$vllm_pkg" ]] && ln -sf "$vllm_pkg" "$rocm_dir/vllm/vllm"
+  fi
+}
+_setup_rocm_symlinks
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/results_qwen35_$(date +%Y%m%d_%H%M%S)}"
 GPU_ARCH="gfx1100"
 

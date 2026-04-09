@@ -60,3 +60,4 @@ tmp/
 all_kernel_prompts.jsonl
 knowledge_base.*
 results_qwen35_*/
+.ipynb_checkpoints/

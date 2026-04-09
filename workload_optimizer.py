@@ -2119,7 +2119,9 @@ def _create_task_config(
     original source and adds a __main__ block for standalone execution.
     """
     spec = kernel.matched_kernel_spec or "unknown"
-    ext = ".py" if kernel.category == "triton" else ".hip"
+    # Agent always writes solution.py (even for HIP kernels — Triton or Python wrapper)
+    # Only use .hip when agent is explicitly asked to write HIP C++ (future feature)
+    ext = ".py"
 
     local_baseline_ref = task_dir / f"baseline_ref{ext}"
     local_baseline = task_dir / f"baseline{ext}"
@@ -4899,7 +4901,7 @@ def _create_standalone_task_config(
     from ground_truth import GroundTruthSpec
 
     kernel_python = _detect_kernel_python()
-    ext = ".py" if kdef.kernel_type in ("triton", "pytorch") else ".hip"
+    ext = ".py"  # Agent always writes .py
     gt = kdef.ground_truth
 
     baseline_path = f"./baseline{ext}"
@@ -5183,7 +5185,7 @@ def cmd_optimize_kernel(args):
     task_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy baseline kernel to task directory
-    ext = ".py" if kdef.kernel_type in ("triton", "pytorch") else ".hip"
+    ext = ".py"  # Agent always writes .py
     baseline_dst = task_dir / f"baseline{ext}"
     if kdef.kernel_path and Path(kdef.kernel_path).exists():
         shutil.copy2(kdef.kernel_path, baseline_dst)
@@ -5368,7 +5370,7 @@ def cmd_grade_kernel(args):
     task_dir = output_dir / kdef.task_id
     task_dir.mkdir(parents=True, exist_ok=True)
 
-    ext = ".py" if kdef.kernel_type in ("triton", "pytorch") else ".hip"
+    ext = ".py"  # Agent always writes .py
 
     # Copy baseline
     baseline_dst = task_dir / f"baseline{ext}"
