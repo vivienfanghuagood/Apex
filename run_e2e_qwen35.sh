@@ -52,7 +52,7 @@ AGENT_MODEL="${AGENT_MODEL:-}"          # empty = backend default
 MAX_ITERATIONS="${MAX_ITERATIONS:-2}"
 MAX_TURNS="${MAX_TURNS:-20}"
 TOP_K="${TOP_K:-5}"
-KERNEL_TYPES="${KERNEL_TYPES:-triton}"
+KERNEL_TYPES="${KERNEL_TYPES:-all}"
 
 # Parse CLI args
 DRY_RUN=""

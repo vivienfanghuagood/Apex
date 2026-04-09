@@ -4217,7 +4217,8 @@ def cmd_list_kernels(args):
             has_solution = " [has solution]"
         print(f"    - {spec}{has_solution}")
 
-    print(f"\n  Example: workload_optimizer.py optimize -r {results_dir} --kernels {kernels[0].matched_kernel_spec or 'name'}")
+    if kernels:
+        print(f"\n  Example: workload_optimizer.py optimize -r {results_dir} --kernels {kernels[0].matched_kernel_spec or 'name'}")
 
 
 def cmd_optimize(args):
