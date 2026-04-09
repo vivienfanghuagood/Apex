@@ -36,6 +36,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODEL_PATH="/app/models/Qwen3.5-4B"
 MODEL_ID="Qwen/Qwen3.5-4B"
 MAGPIE_ROOT="${MAGPIE_ROOT:-/app/Magpie}"
+
+# Fix broken editable vllm install — add source to PYTHONPATH if needed
+if ! python3 -c "from vllm import LLM" 2>/dev/null; then
+  if [[ -d /app/vllm-src/vllm/vllm ]]; then
+    export PYTHONPATH="/app/vllm-src/vllm${PYTHONPATH:+:$PYTHONPATH}"
+  fi
+fi
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/results_qwen35_$(date +%Y%m%d_%H%M%S)}"
 GPU_ARCH="gfx1100"
 
@@ -166,17 +173,50 @@ export MAGPIE_ROOT
 if should_run benchmark; then
   banner "Step 1/8: E2E Benchmark (Qwen3.5-4B on vLLM)"
 
-  BENCH_ARGS=(-b "$BENCH_CONFIG")
-  [[ -n "$SKIP_BENCHMARK" ]] && BENCH_ARGS+=(--skip-benchmark "$SKIP_BENCHMARK")
+  BENCHMARK_REPORT="$RESULTS_DIR/benchmark_report.json"
 
-  python3 workload_optimizer.py benchmark \
-    "${COMMON_ARGS[@]}" \
-    "${BENCH_ARGS[@]}" \
-    --num-benchmark-runs 3 \
-    --benchmark-timeout 1800 \
-    2>&1 | tee "$RESULTS_DIR/step1_benchmark.log"
+  if [[ -n "$SKIP_BENCHMARK" ]]; then
+    info "Using existing benchmark report: $SKIP_BENCHMARK"
+    cp "$SKIP_BENCHMARK" "$BENCHMARK_REPORT"
+  elif [[ -n "$DRY_RUN" ]]; then
+    info "Dry-run: using pipeline's built-in synthetic benchmark"
+    python3 workload_optimizer.py benchmark \
+      "${COMMON_ARGS[@]}" \
+      -b "$BENCH_CONFIG" \
+      --num-benchmark-runs 1 \
+      2>&1 | tee "$RESULTS_DIR/step1_benchmark.log"
+    info "Benchmark log: $RESULTS_DIR/step1_benchmark.log"
+  else
+    # Run self-contained vLLM benchmark (no InferenceX/Magpie dependency)
+    info "Running vLLM benchmark directly (torch profiler + gap analysis)..."
+    python3 tools/vllm_benchmark.py \
+      --model "$MODEL_PATH" \
+      --output-dir "$RESULTS_DIR/benchmark" \
+      --tp 1 --dtype bfloat16 \
+      --max-model-len 4096 \
+      --num-prompts 50 \
+      --input-len 512 --output-len 128 \
+      --concurrency 4 \
+      --profile \
+      2>&1 | tee "$RESULTS_DIR/step1_benchmark.log"
 
-  info "Benchmark log: $RESULTS_DIR/step1_benchmark.log"
+    # Copy the report for --skip-benchmark usage
+    if [[ -f "$RESULTS_DIR/benchmark/benchmark_report.json" ]]; then
+      cp "$RESULTS_DIR/benchmark/benchmark_report.json" "$BENCHMARK_REPORT"
+      info "Benchmark report: $BENCHMARK_REPORT"
+    else
+      echo "ERROR: Benchmark did not produce a report"; exit 1
+    fi
+  fi
+
+  # Feed the report into the pipeline state via --skip-benchmark
+  if [[ -f "$BENCHMARK_REPORT" ]] && [[ -z "$DRY_RUN" ]]; then
+    python3 workload_optimizer.py benchmark \
+      "${COMMON_ARGS[@]}" \
+      -b "$BENCH_CONFIG" \
+      --skip-benchmark "$BENCHMARK_REPORT" \
+      2>&1 | tee -a "$RESULTS_DIR/step1_benchmark.log"
+  fi
 fi
 
 # =============================================================================

@@ -190,13 +190,21 @@ def _magpie_bin() -> list[str]:
             return [str(venv_python), "-m", MAGPIE_MODULE]
         magpie_pkg = Path(magpie_root) / MAGPIE_MODULE
         if magpie_pkg.is_dir() and (magpie_pkg / "__main__.py").exists():
-            return ["python3", "-m", MAGPIE_MODULE]
+            # Ensure MAGPIE_ROOT is on PYTHONPATH so `python3 -m Magpie` works
+            _pp = os.environ.get("PYTHONPATH", "")
+            if magpie_root not in _pp.split(os.pathsep):
+                os.environ["PYTHONPATH"] = magpie_root + (os.pathsep + _pp if _pp else "")
+            return [sys.executable, "-m", MAGPIE_MODULE]
     if shutil.which("magpie"):
         return ["magpie"]
     local_dir = Path(__file__).parent.parent / "tools" / "magpie"
     if (local_dir / MAGPIE_MODULE / "__main__.py").exists():
-        return ["python3", "-m", MAGPIE_MODULE]
-    return ["python3", "-m", MAGPIE_MODULE]
+        _pp = os.environ.get("PYTHONPATH", "")
+        ld = str(local_dir)
+        if ld not in _pp.split(os.pathsep):
+            os.environ["PYTHONPATH"] = ld + (os.pathsep + _pp if _pp else "")
+        return [sys.executable, "-m", MAGPIE_MODULE]
+    return [sys.executable, "-m", MAGPIE_MODULE]
 
 
 def run_magpie_compare(
